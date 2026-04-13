@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SKU Extractor — Planogramas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg: #0d0d0d;
+    --surface: #161616;
+    --surface2: #1e1e1e;
+    --border: #2a2a2a;
+    --gold: #c9a84c;
+    --gold-dim: #7a6330;
+    --text: #e8e8e8;
+    --muted: #666;
+    --success: #4caf7d;
+    --radius: 10px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 20px 80px;
+  }
+
+  /* Grain overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+  }
+
+  .wrapper {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 720px;
+  }
+
+  header {
+    margin-bottom: 48px;
+    text-align: center;
+  }
+
+  .brand {
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  h1 {
+    font-size: clamp(28px, 5vw, 44px);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #fff 40%, var(--gold) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+  }
+
+  /* Drop zone */
+  .dropzone {
+    border: 1.5px dashed var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 52px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .dropzone::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(201,168,76,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .dropzone:hover, .dropzone.drag-over {
+    border-color: var(--gold-dim);
+    background: #1a1a1a;
+  }
+
+  .dropzone-icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 16px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .dropzone-icon svg { color: var(--gold); }
+
+  .dropzone h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  .dropzone p {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 400;
+  }
+
+  #fileInput { display: none; }
+
+  .btn-upload {
+    display: inline-block;
+    margin-top: 20px;
+    padding: 10px 24px;
+    background: var(--gold);
+    color: #0d0d0d;
+    border-radius: 6px;
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.15s;
+  }
+
+  .btn-upload:hover { opacity: 0.88; }
+
+  /* Progress */
+  #progress {
+    display: none;
+    margin-top: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+  }
+
+  .progress-label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .progress-bar-wrap {
+    background: var(--surface2);
+    border-radius: 4px;
+    height: 4px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--gold-dim), var(--gold));
+    border-radius: 4px;
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+
+  /* Results */
+  #result {
+    display: none;
+    margin-top: 28px;
+  }
+
+  .result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .result-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--gold);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .badge {
+    background: rgba(201,168,76,0.12);
+    border: 1px solid var(--gold-dim);
+    color: var(--gold);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+
+  .sku-output {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    color: #ccc;
+    line-height: 1.8;
+    word-break: break-all;
+    position: relative;
+    min-height: 80px;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+
+  .sku-output::-webkit-scrollbar { width: 4px; }
+  .sku-output::-webkit-scrollbar-track { background: transparent; }
+  .sku-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.15s, background 0.15s;
+  }
+
+  .btn-primary {
+    background: var(--gold);
+    color: #0d0d0d;
+  }
+
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .btn:hover { opacity: 0.8; }
+
+  .btn-success {
+    background: var(--success) !important;
+    color: #fff !important;
+  }
+
+  /* Stats row */
+  .stats {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+  }
+
+  .stat-card {
+    flex: 1;
+    min-width: 100px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+
+  .stat-label {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .stat-value {
+    font-family: 'DM Mono', monospace;
+    font-size: 22px;
+    color: var(--gold);
+    font-weight: 500;
+  }
+
+  /* Error */
+  .error-box {
+    display: none;
+    margin-top: 20px;
+    background: rgba(220, 80, 80, 0.08);
+    border: 1px solid rgba(220, 80, 80, 0.3);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    font-size: 13px;
+    color: #e08080;
+  }
+
+  /* New file hint */
+  .reset-hint {
+    margin-top: 18px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .reset-hint:hover { color: var(--text); }
+
+  footer {
+    margin-top: 60px;
+    font-size: 11px;
+    color: #333;
+    letter-spacing: 0.05em;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrapper">
+  <header>
+    <p class="brand">Grupo Alcina Maria · Boticário</p>
+    <h1>SKU Extractor</h1>
+    <p class="subtitle">Carregue um PDF de planograma e extraia todos os códigos de produto automaticamente.</p>
+  </header>
+
+  <!-- Drop Zone -->
+  <div class="dropzone" id="dropzone">
+    <div class="dropzone-icon">
+      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="12" y1="18" x2="12" y2="12"/>
+        <line x1="9" y1="15" x2="15" y2="15"/>
+      </svg>
+    </div>
+    <h2>Arraste o PDF do planograma aqui</h2>
+    <p>ou clique para selecionar o arquivo</p>
+    <button class="btn-upload" id="btnOpen" type="button">Selecionar PDF</button>
+    <input type="file" id="fileInput" accept="application/pdf">
+  </div>
+
+  <!-- Progress -->
+  <div id="progress">
+    <div class="progress-label" id="progressLabel">Lendo páginas do PDF…</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progressBar"></div>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div class="error-box" id="errorBox"></div>
+
+  <!-- Result -->
+  <div id="result">
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-label">SKUs encontrados</div>
+        <div class="stat-value" id="statSkus">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Páginas lidas</div>
+        <div class="stat-value" id="statPages">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Prateleiras</div>
+        <div class="stat-value" id="statShelves">0</div>
+      </div>
+    </div>
+
+    <div style="margin-top: 24px;">
+      <div class="result-header">
+        <span class="result-title">Códigos extraídos</span>
+        <span class="badge" id="skuCount">0 SKUs</span>
+      </div>
+      <div class="sku-output" id="skuOutput"></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="btnCopy">Copiar para área de transferência</button>
+      <button class="btn btn-secondary" id="btnDownload">Baixar como .txt</button>
+    </div>
+
+    <p class="reset-hint" id="resetBtn">← Processar outro PDF</p>
+  </div>
+
+  <footer>SKU Extractor · Planogramas · Ciclo automático</footer>
+</div>
+
+<script>
+// Use CDN worker; sandboxed previews will fall back to fake worker automatically
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+const dropzone   = document.getElementById('dropzone');
+const fileInput  = document.getElementById('fileInput');
+const progress   = document.getElementById('progress');
+const progressLabel = document.getElementById('progressLabel');
+const progressBar   = document.getElementById('progressBar');
+const result     = document.getElementById('result');
+const skuOutput  = document.getElementById('skuOutput');
+const skuCount   = document.getElementById('skuCount');
+const statSkus   = document.getElementById('statSkus');
+const statPages  = document.getElementById('statPages');
+const statShelves= document.getElementById('statShelves');
+const btnCopy    = document.getElementById('btnCopy');
+const btnDownload= document.getElementById('btnDownload');
+const resetBtn   = document.getElementById('resetBtn');
+const errorBox   = document.getElementById('errorBox');
+
+// Drag & drop
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type === 'application/pdf') processFile(file);
+  else showError('Por favor, envie um arquivo PDF válido.');
+});
+
+// Open file picker only via the button — avoids double-trigger from label+click
+document.getElementById('btnOpen').addEventListener('click', e => {
+  e.stopPropagation();
+  fileInput.click();
+});
+
+fileInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  fileInput.value = ''; // reset so same file can be re-selected
+  if (file) processFile(file);
+});
+
+resetBtn.addEventListener('click', resetUI);
+
+function resetUI() {
+  result.style.display   = 'none';
+  progress.style.display = 'none';
+  errorBox.style.display = 'none';
+  dropzone.style.display = 'block';
+  fileInput.value        = '';
+  progressBar.style.width = '0%';
+}
+
+function showError(msg) {
+  errorBox.textContent   = msg;
+  errorBox.style.display = 'block';
+  progress.style.display = 'none';
+}
+
+async function processFile(file) {
+  errorBox.style.display = 'none';
+  dropzone.style.display = 'none';
+  result.style.display   = 'none';
+  progress.style.display = 'block';
+  progressBar.style.width = '5%';
+  progressLabel.textContent = 'Carregando PDF…';
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const totalPages = pdf.numPages;
+
+    progressBar.style.width = '15%';
+    progressLabel.textContent = `Lendo ${totalPages} páginas…`;
+
+    let allText = '';
+    let shelfCount = 0;
+
+    for (let i = 1; i <= totalPages; i++) {
+      const page  = await pdf.getPage(i);
+      const tc    = await page.getTextContent();
+      const pageText = tc.items.map(item => item.str).join(' ');
+      allText += ' ' + pageText;
+
+      // count PRATELEIRA occurrences for stats
+      const matches = (pageText.match(/PRATELEIRA/gi) || []).length;
+      shelfCount += matches;
+
+      const pct = 15 + Math.round((i / totalPages) * 70);
+      progressBar.style.width = pct + '%';
+      progressLabel.textContent = `Página ${i} de ${totalPages}…`;
+    }
+
+    progressBar.style.width = '90%';
+    progressLabel.textContent = 'Extraindo SKUs…';
+
+    const skus = extractSKUs(allText);
+
+    progressBar.style.width = '100%';
+    progressLabel.textContent = 'Concluído!';
+
+    setTimeout(() => {
+      progress.style.display = 'none';
+      renderResult(skus, totalPages, shelfCount);
+    }, 400);
+
+  } catch (err) {
+    console.error(err);
+    showError('Erro ao processar o PDF: ' + err.message);
+    dropzone.style.display = 'block';
+  }
+}
+
+/**
+ * Extract SKUs from raw PDF text.
+ *
+ * Strategy:
+ * 1. Find sections that start with table headers
+ *    "Código do Produto Name Frentes Empilhar Fundo"
+ *    followed by "PRATELEIRA X/Y"
+ * 2. Within each section, grab 4-5 digit numeric codes that
+ *    appear BEFORE a product name (non-numeric content).
+ *
+ * The text from pdf.js arrives as space-separated tokens, so we tokenize
+ * and apply a sliding-window state machine.
+ */
+function extractSKUs(text) {
+  // Normalize whitespace
+  text = text.replace(/\s+/g, ' ').trim();
+
+  // Find all table sections delimited by the header pattern
+  // "Código do Produto" (or just "Código" depending on extraction)
+  // We grab everything from the first PRATELEIRA to a hard stop.
+  const tableHeaderRe = /C[oó]digo\s+do\s+Produto/gi;
+
+  // Collect all PRATELEIRA blocks
+  // Each row in the table looks like: 
+  //   <4-5 digit code>  <PRODUCT NAME IN CAPS>  <number> <number> <number>
+  // After pdf.js extraction the text is linearized, so we look for
+  // sequences: digit-group (4-5) followed by at least one ALL-CAPS word.
+
+  const skus = new Set();
+
+  // Primary pattern: 4-5 digit number preceded by whitespace/start
+  // and followed by an uppercase word (product name)
+  // We also need to avoid matching shelf numbers like "1/1", page numbers, etc.
+  
+  // Step 1: isolate content that belongs to a table
+  // Table content is between "Código do Produto" and either the next page header or end
+  const tableSegments = [];
+  let match;
+  const headerRe = /C[oó]digo\s+do\s+Produto\s+Name/gi;
+  let lastIndex = 0;
+  const indices = [];
+  
+  let hm;
+  const tempRe = /C[oó]digo\s+do\s+Produto/gi;
+  while ((hm = tempRe.exec(text)) !== null) {
+    indices.push(hm.index);
+  }
+
+  if (indices.length === 0) {
+    // Fallback: scan entire text
+    tableSegments.push(text);
+  } else {
+    for (let i = 0; i < indices.length; i++) {
+      const start = indices[i];
+      const end   = indices[i + 1] || text.length;
+      tableSegments.push(text.substring(start, end));
+    }
+  }
+
+  // Step 2: within each segment, extract 4-5 digit codes
+  // Pattern: standalone 4-5 digit number
+  // Exclusions: 
+  //   - Numbers that are part of fractions like 1/1, 2/6
+  //   - Numbers preceded by a slash (shelf positions)
+  //   - Numbers that are clearly measurements (100ML, 75ML already contain letters)
+  //   - Single/double/triple digit numbers
+
+  const codeRe = /(?<![\/\d])(\b\d{4,5}\b)(?!\/|\d)/g;
+
+  for (const segment of tableSegments) {
+    let cm;
+    while ((cm = codeRe.exec(segment)) !== null) {
+      const num = cm[1];
+      // Extra safety: skip if this looks like a year or page artifact
+      // Valid SKUs in this dataset are between 1000 and 99999
+      const n = parseInt(num, 10);
+      if (n >= 1000 && n <= 99999) {
+        // Confirm: the character immediately after should NOT be a digit
+        // and the character immediately before should not be a digit
+        const before = segment[cm.index - 1] || ' ';
+        const after  = segment[cm.index + num.length] || ' ';
+        if (!/\d/.test(before) && !/\d/.test(after) && before !== '/') {
+          skus.add(num);
+        }
+      }
+    }
+  }
+
+  return Array.from(skus).sort((a, b) => parseInt(a) - parseInt(b));
+}
+
+function renderResult(skus, pages, shelves) {
+  const csvLine = skus.join(',');
+
+  statSkus.textContent   = skus.length;
+  statPages.textContent  = pages;
+  statShelves.textContent = shelves;
+  skuCount.textContent   = skus.length + ' SKUs';
+  skuOutput.textContent  = csvLine || '— nenhum SKU encontrado —';
+
+  result.style.display = 'block';
+
+  // Copy button
+  btnCopy.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(csvLine);
+      btnCopy.textContent = '✓ Copiado!';
+      btnCopy.classList.add('btn-success');
+      setTimeout(() => {
+        btnCopy.textContent = 'Copiar para área de transferência';
+        btnCopy.classList.remove('btn-success');
+      }, 2000);
+    } catch {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = csvLine;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      btnCopy.textContent = '✓ Copiado!';
+      btnCopy.classList.add('btn-success');
+      setTimeout(() => {
+        btnCopy.textContent = 'Copiar para área de transferência';
+        btnCopy.classList.remove('btn-success');
+      }, 2000);
+    }
+  };
+
+  // Download button
+  btnDownload.onclick = () => {
+    const blob = new Blob([csvLine], { type: 'text/plain;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'skus_planograma.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+}
+</script>
+</body>
+</html>
