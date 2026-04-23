@@ -591,16 +591,16 @@ function extractData(text) {
       if (pratMatch) rowEnd = end + pratMatch.index;
 
       const rowText = seg.substring(end, rowEnd);
-      const nums = (rowText.match(/\b\d+\b/g) || []).map(Number);
+
+      // First run of 3 consecutive standalone numbers = column values.
+      // Navigation text uses fractions (1/2, 2/1) which never form this pattern.
+      const tripleMatch = /\b(\d+)\b\s+\b(\d+)\b\s+\b(\d+)\b/.exec(rowText);
 
       let quantity = null;
-      if (hasTU) {
-        // Total_Units é o último número da linha
-        quantity = nums.length > 0 ? nums[nums.length - 1] : null;
-      } else if (nums.length >= 2) {
-        // Quantidade = Frentes × Fundo (1º × último dos últimos 3 números)
-        const last3 = nums.slice(-3);
-        quantity = last3[0] * last3[last3.length - 1];
+      if (tripleMatch) {
+        const frentes = Number(tripleMatch[1]);
+        const col3    = Number(tripleMatch[3]); // Total_Units or Fundo
+        quantity = hasTU ? col3 : frentes * col3;
       }
 
       if (!items.has(sku)) items.set(sku, quantity);
