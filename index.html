@@ -403,14 +403,22 @@
 
     <div style="margin-top: 24px;">
       <div class="result-header">
-        <span class="result-title">Códigos extraídos</span>
+        <span class="result-title">Separado por vírgula</span>
         <span class="badge" id="skuCount">0 SKUs</span>
       </div>
       <div class="sku-output" id="skuOutput"></div>
+      <button class="btn btn-secondary" id="btnCopy" style="margin-top:10px;">Copiar (vírgula)</button>
+    </div>
+
+    <div style="margin-top: 20px;">
+      <div class="result-header">
+        <span class="result-title">Separado por ponto e vírgula</span>
+      </div>
+      <div class="sku-output" id="skuOutputSemi"></div>
+      <button class="btn btn-secondary" id="btnCopySemi" style="margin-top:10px;">Copiar (ponto e vírgula)</button>
     </div>
 
     <div class="actions">
-      <button class="btn btn-primary" id="btnCopy">Copiar para área de transferência</button>
       <button class="btn btn-secondary" id="btnDownload">Baixar SKUs (.txt)</button>
       <button class="btn btn-secondary" id="btnPlanilha">Baixar Planilha (.xlsx)</button>
     </div>
@@ -437,9 +445,11 @@ const statSkus   = document.getElementById('statSkus');
 const statPages  = document.getElementById('statPages');
 const statShelves= document.getElementById('statShelves');
 const btnCopy     = document.getElementById('btnCopy');
+const btnCopySemi = document.getElementById('btnCopySemi');
 const btnDownload = document.getElementById('btnDownload');
 const btnPlanilha = document.getElementById('btnPlanilha');
 const resetBtn    = document.getElementById('resetBtn');
+const skuOutputSemi = document.getElementById('skuOutputSemi');
 const errorBox   = document.getElementById('errorBox');
 
 // Drag & drop
@@ -617,6 +627,7 @@ function extractData(text) {
 
 function renderResult({ items, hasTotalUnits }, pages, shelves) {
   const skuList    = items.map(i => i.sku).join(',');
+  const skuListSemi = items.map(i => i.sku).join('; ');
   const csvContent = 'Código,Quantidade\n' +
     items.map(({ sku, quantity }) => `${sku},${quantity ?? ''}`).join('\n');
   const quantLabel = hasTotalUnits ? 'Total_Units' : 'Frentes×Fundo';
@@ -625,32 +636,31 @@ function renderResult({ items, hasTotalUnits }, pages, shelves) {
   statPages.textContent   = pages;
   statShelves.textContent = shelves;
   skuCount.textContent    = items.length + ' SKUs';
-  skuOutput.textContent   = skuList || '— nenhum SKU encontrado —';
+  skuOutput.textContent   = skuList     || '— nenhum SKU encontrado —';
+  skuOutputSemi.textContent = skuListSemi || '— nenhum SKU encontrado —';
   result.style.display    = 'block';
 
-  const showCopyFeedback = () => {
-    btnCopy.textContent = '✓ Copiado!';
-    btnCopy.classList.add('btn-success');
-    setTimeout(() => {
-      btnCopy.textContent = 'Copiar para área de transferência';
-      btnCopy.classList.remove('btn-success');
-    }, 2000);
+  const makeCopyHandler = (btn, text, label) => {
+    btn.textContent = label;
+    btn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      btn.textContent = '✓ Copiado!';
+      btn.classList.add('btn-success');
+      setTimeout(() => { btn.textContent = label; btn.classList.remove('btn-success'); }, 2000);
+    };
   };
 
-  btnCopy.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(skuList);
-      showCopyFeedback();
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = skuList;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      showCopyFeedback();
-    }
-  };
+  makeCopyHandler(btnCopy,     skuList,     'Copiar (vírgula)');
+  makeCopyHandler(btnCopySemi, skuListSemi, 'Copiar (ponto e vírgula)');
 
   btnDownload.onclick = () => {
     const blob = new Blob([skuList], { type: 'text/plain;charset=utf-8' });
