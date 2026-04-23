@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SKU Extractor — Planogramas</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
 
@@ -231,6 +232,7 @@
     font-size: 13px;
     color: #ccc;
     line-height: 1.8;
+    white-space: pre-wrap;
     word-break: break-all;
     position: relative;
     min-height: 80px;
@@ -409,7 +411,8 @@
 
     <div class="actions">
       <button class="btn btn-primary" id="btnCopy">Copiar para área de transferência</button>
-      <button class="btn btn-secondary" id="btnDownload">Baixar como .txt</button>
+      <button class="btn btn-secondary" id="btnDownload">Baixar SKUs (.txt)</button>
+      <button class="btn btn-secondary" id="btnPlanilha">Baixar Planilha (.csv)</button>
     </div>
 
     <p class="reset-hint" id="resetBtn">← Processar outro PDF</p>
@@ -433,9 +436,10 @@ const skuCount   = document.getElementById('skuCount');
 const statSkus   = document.getElementById('statSkus');
 const statPages  = document.getElementById('statPages');
 const statShelves= document.getElementById('statShelves');
-const btnCopy    = document.getElementById('btnCopy');
-const btnDownload= document.getElementById('btnDownload');
-const resetBtn   = document.getElementById('resetBtn');
+const btnCopy     = document.getElementById('btnCopy');
+const btnDownload = document.getElementById('btnDownload');
+const btnPlanilha = document.getElementById('btnPlanilha');
+const resetBtn    = document.getElementById('resetBtn');
 const errorBox   = document.getElementById('errorBox');
 
 // Drag & drop
@@ -515,14 +519,14 @@ async function processFile(file) {
     progressBar.style.width = '90%';
     progressLabel.textContent = 'Extraindo SKUs…';
 
-    const skus = extractSKUs(allText);
+    const { items, hasTotalUnits } = extractData(allText);
 
     progressBar.style.width = '100%';
     progressLabel.textContent = 'Concluído!';
 
     setTimeout(() => {
       progress.style.display = 'none';
-      renderResult(skus, totalPages, shelfCount);
+      renderResult({ items, hasTotalUnits }, totalPages, shelfCount);
     }, 400);
 
   } catch (err) {
@@ -533,143 +537,139 @@ async function processFile(file) {
 }
 
 /**
- * Extract SKUs from raw PDF text.
+ * Extract SKUs (and optionally Total_Units) from raw PDF text.
  *
- * Strategy:
- * 1. Find sections that start with table headers
- *    "Código do Produto Name Frentes Empilhar Fundo"
- *    followed by "PRATELEIRA X/Y"
- * 2. Within each section, grab 4-5 digit numeric codes that
- *    appear BEFORE a product name (non-numeric content).
+ * Table header detected: "Código do Produto Name Frentes Empilhar Fundo [Total_Units]"
+ * Each row: <4-5 digit SKU> <PRODUCT NAME> <Frentes> <Empilhar> <Fundo> [<Total_Units>]
  *
- * The text from pdf.js arrives as space-separated tokens, so we tokenize
- * and apply a sliding-window state machine.
+ * When Total_Units column is present in the segment header, the last standalone
+ * number found after the SKU (until the next SKU or PRATELEIRA) is used as Total_Units.
  */
-function extractSKUs(text) {
-  // Normalize whitespace
+function extractData(text) {
   text = text.replace(/\s+/g, ' ').trim();
 
-  // Find all table sections delimited by the header pattern
-  // "Código do Produto" (or just "Código" depending on extraction)
-  // We grab everything from the first PRATELEIRA to a hard stop.
-  const tableHeaderRe = /C[oó]digo\s+do\s+Produto/gi;
+  const hasTotalUnits = /Total[\s_]Units/gi.test(text);
 
-  // Collect all PRATELEIRA blocks
-  // Each row in the table looks like: 
-  //   <4-5 digit code>  <PRODUCT NAME IN CAPS>  <number> <number> <number>
-  // After pdf.js extraction the text is linearized, so we look for
-  // sequences: digit-group (4-5) followed by at least one ALL-CAPS word.
-
-  const skus = new Set();
-
-  // Primary pattern: 4-5 digit number preceded by whitespace/start
-  // and followed by an uppercase word (product name)
-  // We also need to avoid matching shelf numbers like "1/1", page numbers, etc.
-  
-  // Step 1: isolate content that belongs to a table
-  // Table content is between "Código do Produto" and either the next page header or end
-  const tableSegments = [];
-  let match;
-  const headerRe = /C[oó]digo\s+do\s+Produto\s+Name/gi;
-  let lastIndex = 0;
   const indices = [];
-  
+  const tempRe = /C[oó]digo\s+do\s+(?:Produto|SKU)/gi;
   let hm;
-  const tempRe = /C[oó]digo\s+do\s+Produto/gi;
   while ((hm = tempRe.exec(text)) !== null) {
     indices.push(hm.index);
   }
 
-  if (indices.length === 0) {
-    // Fallback: scan entire text
-    tableSegments.push(text);
-  } else {
-    for (let i = 0; i < indices.length; i++) {
-      const start = indices[i];
-      const end   = indices[i + 1] || text.length;
-      tableSegments.push(text.substring(start, end));
-    }
-  }
+  const tableSegments = indices.length === 0
+    ? [{ seg: text, hasTU: hasTotalUnits }]
+    : indices.map((start, i) => {
+        const seg = text.substring(start, indices[i + 1] || text.length);
+        return { seg, hasTU: /Total[\s_]Units/gi.test(seg.substring(0, 600)) };
+      });
 
-  // Step 2: within each segment, extract 4-5 digit codes
-  // Pattern: standalone 4-5 digit number
-  // Exclusions: 
-  //   - Numbers that are part of fractions like 1/1, 2/6
-  //   - Numbers preceded by a slash (shelf positions)
-  //   - Numbers that are clearly measurements (100ML, 75ML already contain letters)
-  //   - Single/double/triple digit numbers
+  const items = new Map(); // sku -> totalUnits (string | null)
 
-  const codeRe = /(?<![\/\d])(\b\d{4,5}\b)(?!\/|\d)/g;
-
-  for (const segment of tableSegments) {
+  for (const { seg, hasTU } of tableSegments) {
+    const codeRe = /(?<![\/\d])(\b\d{4,5}\b)(?!\/|\d)/g;
+    const skuMatches = [];
     let cm;
-    while ((cm = codeRe.exec(segment)) !== null) {
-      const num = cm[1];
-      // Extra safety: skip if this looks like a year or page artifact
-      // Valid SKUs in this dataset are between 1000 and 99999
-      const n = parseInt(num, 10);
+
+    while ((cm = codeRe.exec(seg)) !== null) {
+      const n = parseInt(cm[1], 10);
       if (n >= 1000 && n <= 99999) {
-        // Confirm: the character immediately after should NOT be a digit
-        // and the character immediately before should not be a digit
-        const before = segment[cm.index - 1] || ' ';
-        const after  = segment[cm.index + num.length] || ' ';
+        const before = seg[cm.index - 1] || ' ';
+        const after  = seg[cm.index + cm[1].length] || ' ';
         if (!/\d/.test(before) && !/\d/.test(after) && before !== '/') {
-          skus.add(num);
+          skuMatches.push({ sku: cm[1], start: cm.index, end: cm.index + cm[1].length });
         }
       }
     }
+
+    for (let i = 0; i < skuMatches.length; i++) {
+      const { sku, end } = skuMatches[i];
+      let rowEnd = skuMatches[i + 1]?.start ?? seg.length;
+
+      // Trim row at Prateleira marker (case-insensitive) before the next SKU
+      const pratMatch = /\bprateleira\b/i.exec(seg.substring(end, rowEnd));
+      if (pratMatch) rowEnd = end + pratMatch.index;
+
+      const rowText = seg.substring(end, rowEnd);
+      const nums = (rowText.match(/\b\d+\b/g) || []).map(Number);
+
+      let quantity = null;
+      if (hasTU) {
+        // Total_Units é o último número da linha
+        quantity = nums.length > 0 ? nums[nums.length - 1] : null;
+      } else if (nums.length >= 2) {
+        // Quantidade = Frentes × Fundo (1º × último dos últimos 3 números)
+        const last3 = nums.slice(-3);
+        quantity = last3[0] * last3[last3.length - 1];
+      }
+
+      if (!items.has(sku)) items.set(sku, quantity);
+    }
   }
 
-  return Array.from(skus).sort((a, b) => parseInt(a) - parseInt(b));
+  return {
+    items: Array.from(items.entries())
+      .map(([sku, quantity]) => ({ sku, quantity }))
+      .sort((a, b) => parseInt(a.sku) - parseInt(b.sku)),
+    hasTotalUnits
+  };
 }
 
-function renderResult(skus, pages, shelves) {
-  const csvLine = skus.join(',');
+function renderResult({ items, hasTotalUnits }, pages, shelves) {
+  const skuList    = items.map(i => i.sku).join(',');
+  const csvContent = 'Código,Quantidade\n' +
+    items.map(({ sku, quantity }) => `${sku},${quantity ?? ''}`).join('\n');
+  const quantLabel = hasTotalUnits ? 'Total_Units' : 'Frentes×Fundo';
 
-  statSkus.textContent   = skus.length;
-  statPages.textContent  = pages;
+  statSkus.textContent    = items.length;
+  statPages.textContent   = pages;
   statShelves.textContent = shelves;
-  skuCount.textContent   = skus.length + ' SKUs';
-  skuOutput.textContent  = csvLine || '— nenhum SKU encontrado —';
+  skuCount.textContent    = items.length + ' SKUs';
+  skuOutput.textContent   = skuList || '— nenhum SKU encontrado —';
+  result.style.display    = 'block';
 
-  result.style.display = 'block';
+  const showCopyFeedback = () => {
+    btnCopy.textContent = '✓ Copiado!';
+    btnCopy.classList.add('btn-success');
+    setTimeout(() => {
+      btnCopy.textContent = 'Copiar para área de transferência';
+      btnCopy.classList.remove('btn-success');
+    }, 2000);
+  };
 
-  // Copy button
   btnCopy.onclick = async () => {
     try {
-      await navigator.clipboard.writeText(csvLine);
-      btnCopy.textContent = '✓ Copiado!';
-      btnCopy.classList.add('btn-success');
-      setTimeout(() => {
-        btnCopy.textContent = 'Copiar para área de transferência';
-        btnCopy.classList.remove('btn-success');
-      }, 2000);
+      await navigator.clipboard.writeText(skuList);
+      showCopyFeedback();
     } catch {
-      // Fallback
       const ta = document.createElement('textarea');
-      ta.value = csvLine;
+      ta.value = skuList;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand('copy');
       document.body.removeChild(ta);
-      btnCopy.textContent = '✓ Copiado!';
-      btnCopy.classList.add('btn-success');
-      setTimeout(() => {
-        btnCopy.textContent = 'Copiar para área de transferência';
-        btnCopy.classList.remove('btn-success');
-      }, 2000);
+      showCopyFeedback();
     }
   };
 
-  // Download button
   btnDownload.onclick = () => {
-    const blob = new Blob([csvLine], { type: 'text/plain;charset=utf-8' });
+    const blob = new Blob([skuList], { type: 'text/plain;charset=utf-8' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
     a.download = 'skus_planograma.txt';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  btnPlanilha.textContent = `Baixar Planilha — ${quantLabel} (.xlsx)`;
+  btnPlanilha.onclick = () => {
+    const rows = [['Código', 'Quantidade'],
+      ...items.map(({ sku, quantity }) => [sku, quantity ?? ''])];
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Quantidades');
+    XLSX.writeFile(wb, 'planilha_quantidades.xlsx');
   };
 }
 </script>
