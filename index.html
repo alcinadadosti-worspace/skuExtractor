@@ -600,8 +600,8 @@ function extractData(text) {
       const codeSec   = seg.substring(0, splitAt);
       const depthSec  = seg.substring(splitAt + profMatch[0].length);
 
-      // Extrai SKUs em ordem da seção de códigos
-      const codeRe = /(?<![\/\d])(\b\d{4,5}\b)(?!\/|\d)/g;
+      // Extrai SKUs em ordem da seção de códigos (5 dígitos exatos evita capturar anos como 2024)
+      const codeRe = /(?<![\/\d])(\b\d{5}\b)(?!\/|\d)/g;
       const orderedSkus = [];
       let cm;
       while ((cm = codeRe.exec(codeSec)) !== null) {
@@ -633,7 +633,10 @@ function extractData(text) {
 
     } else {
       // Formatos 1, 2 e 3 — lógica existente
-      const codeRe = /(?<![\/\d])(\b\d{4,5}\b)(?!\/|\d)/g;
+      // hasProf: exige 5 dígitos para não capturar anos (ex: 2024) em descrições de produto
+      const codeRe = hasProf
+        ? /(?<![\/\d])(\b\d{5}\b)(?!\/|\d)/g
+        : /(?<![\/\d])(\b\d{4,5}\b)(?!\/|\d)/g;
       const skuMatches = [];
       let cm;
 
