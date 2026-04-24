@@ -529,14 +529,14 @@ async function processFile(file) {
     progressBar.style.width = '90%';
     progressLabel.textContent = 'Extraindo SKUs…';
 
-    const { items, hasTotalUnits } = extractData(allText);
+    const extracted = extractData(allText);
 
     progressBar.style.width = '100%';
     progressLabel.textContent = 'Concluído!';
 
     setTimeout(() => {
       progress.style.display = 'none';
-      renderResult({ items, hasTotalUnits }, totalPages, shelfCount);
+      renderResult(extracted, totalPages, shelfCount);
     }, 400);
 
   } catch (err) {
@@ -546,74 +546,136 @@ async function processFile(file) {
   }
 }
 
-/**
- * Extract SKUs (and optionally Total_Units) from raw PDF text.
- *
- * Table header detected: "Código do Produto Name Frentes Empilhar Fundo [Total_Units]"
- * Each row: <4-5 digit SKU> <PRODUCT NAME> <Frentes> <Empilhar> <Fundo> [<Total_Units>]
- *
- * When Total_Units column is present in the segment header, the last standalone
- * number found after the SKU (until the next SKU or PRATELEIRA) is used as Total_Units.
+/*
+ * Formatos detectados automaticamente pelo nome das colunas:
+ *  1. "Código do Produto  Frentes  Empilhar  Fundo"        → quantidade = Frentes × Fundo
+ *  2. "Código do SKU  Frentes  Profundidade  Total_Units"  → quantidade = Total_Units
+ *  3. "Código Produto  Profundidade"  (mesma página)       → quantidade = Profundidade
+ *  4. "Código Produto  Frentes" + próxima página só com "Profundidade" (INFANTIL-style)
+ *     → Profundidade associada por índice de linha
  */
 function extractData(text) {
   text = text.replace(/\s+/g, ' ').trim();
 
   const hasTotalUnits = /Total[\s_]Units/gi.test(text);
 
+  // Detecta segmentos de tabela
   const indices = [];
-  const tempRe = /C[oó]digo\s+do\s+(?:Produto|SKU)/gi;
+  const tempRe = /C[oó]digo(?:\s+do)?\s+(?:Produto|SKU)/gi;
   let hm;
   while ((hm = tempRe.exec(text)) !== null) {
     indices.push(hm.index);
   }
 
   const tableSegments = indices.length === 0
-    ? [{ seg: text, hasTU: hasTotalUnits }]
+    ? [{
+        seg: text,
+        hasTU: hasTotalUnits,
+        hasProf: /Profundidade/i.test(text) && !hasTotalUnits,
+        hasSplitProf: false
+      }]
     : indices.map((start, i) => {
-        const seg = text.substring(start, indices[i + 1] || text.length);
-        return { seg, hasTU: /Total[\s_]Units/gi.test(seg.substring(0, 600)) };
+        const seg    = text.substring(start, indices[i + 1] || text.length);
+        const header = seg.substring(0, 600);
+        const hasTU  = /Total[\s_]Units/gi.test(header);
+        const hasProf = /Profundidade/i.test(header) && !hasTU;
+        // Formato 4 (INFANTIL-style): Profundidade aparece depois dos dados de SKU,
+        // numa página companheira separada
+        const hasSplitProf = !hasProf && !hasTU && /Profundidade/i.test(seg.substring(600));
+        return { seg, hasTU, hasProf, hasSplitProf };
       });
 
-  const items = new Map(); // sku -> totalUnits (string | null)
+  const hasProfundidade = tableSegments.some(s => s.hasProf || s.hasSplitProf);
 
-  for (const { seg, hasTU } of tableSegments) {
-    const codeRe = /(?<![\/\d])(\b\d{4,5}\b)(?!\/|\d)/g;
-    const skuMatches = [];
-    let cm;
+  const items = new Map();
 
-    while ((cm = codeRe.exec(seg)) !== null) {
-      const n = parseInt(cm[1], 10);
-      if (n >= 1000 && n <= 99999) {
-        const before = seg[cm.index - 1] || ' ';
-        const after  = seg[cm.index + cm[1].length] || ' ';
-        if (!/\d/.test(before) && !/\d/.test(after) && before !== '/') {
-          skuMatches.push({ sku: cm[1], start: cm.index, end: cm.index + cm[1].length });
+  for (const { seg, hasTU, hasProf, hasSplitProf } of tableSegments) {
+
+    if (hasSplitProf) {
+      // Formato 4: SKUs numa página, Profundidade na página seguinte
+      // Divide o segmento em seção de códigos e seção de profundidade
+      const laterText = seg.substring(600);
+      const profMatch = /Profundidade/i.exec(laterText);
+      const splitAt   = 600 + profMatch.index;
+      const codeSec   = seg.substring(0, splitAt);
+      const depthSec  = seg.substring(splitAt + profMatch[0].length);
+
+      // Extrai SKUs em ordem da seção de códigos
+      const codeRe = /(?<![\/\d])(\b\d{4,5}\b)(?!\/|\d)/g;
+      const orderedSkus = [];
+      let cm;
+      while ((cm = codeRe.exec(codeSec)) !== null) {
+        const n = parseInt(cm[1], 10);
+        if (n >= 1000 && n <= 99999) {
+          const before = codeSec[cm.index - 1] || ' ';
+          const after  = codeSec[cm.index + cm[1].length] || ' ';
+          if (!/\d/.test(before) && !/\d/.test(after) && before !== '/') {
+            orderedSkus.push(cm[1]);
+          }
         }
       }
-    }
 
-    for (let i = 0; i < skuMatches.length; i++) {
-      const { sku, end } = skuMatches[i];
-      let rowEnd = skuMatches[i + 1]?.start ?? seg.length;
-
-      // Trim row at Prateleira marker (case-insensitive) before the next SKU
-      const pratMatch = /\bprateleira\b/i.exec(seg.substring(end, rowEnd));
-      if (pratMatch) rowEnd = end + pratMatch.index;
-
-      const rowText = seg.substring(end, rowEnd);
-
-      // First run of 3 consecutive standalone numbers = column values.
-      // Navigation text uses fractions (1/2, 2/1) which never form this pattern.
-      const tripleMatch = /\b(\d+)\b\s+\b(\d+)\b\s+\b(\d+)\b/.exec(rowText);
-
-      let quantity = null;
-      if (tripleMatch) {
-        const frentes = Number(tripleMatch[1]);
-        const col3    = Number(tripleMatch[3]); // Total_Units or Fundo
-        quantity = hasTU ? col3 : frentes * col3;
+      // Extrai valores de profundidade em ordem, ignorando marcadores de prateleira (ex: 1/1, 2/3)
+      const depthRe = /(?<![\/\d])(\b\d{1,3}\b)(?!\/|\d)/g;
+      const depthVals = [];
+      let dm;
+      while ((dm = depthRe.exec(depthSec)) !== null) {
+        depthVals.push(Number(dm[1]));
       }
 
-      if (!items.has(sku)) items.set(sku, quantity);
+      // Associa cada SKU ao seu valor de profundidade pelo índice de linha
+      for (let i = 0; i < orderedSkus.length; i++) {
+        const sku = orderedSkus[i];
+        if (!items.has(sku) && depthVals[i] !== undefined) {
+          items.set(sku, depthVals[i]);
+        }
+      }
+
+    } else {
+      // Formatos 1, 2 e 3 — lógica existente
+      const codeRe = /(?<![\/\d])(\b\d{4,5}\b)(?!\/|\d)/g;
+      const skuMatches = [];
+      let cm;
+
+      while ((cm = codeRe.exec(seg)) !== null) {
+        const n = parseInt(cm[1], 10);
+        if (n >= 1000 && n <= 99999) {
+          const before = seg[cm.index - 1] || ' ';
+          const after  = seg[cm.index + cm[1].length] || ' ';
+          if (!/\d/.test(before) && !/\d/.test(after) && before !== '/') {
+            skuMatches.push({ sku: cm[1], start: cm.index, end: cm.index + cm[1].length });
+          }
+        }
+      }
+
+      for (let i = 0; i < skuMatches.length; i++) {
+        const { sku, end } = skuMatches[i];
+        let rowEnd = skuMatches[i + 1]?.start ?? seg.length;
+
+        const pratMatch = /\bprateleira\b/i.exec(seg.substring(end, rowEnd));
+        if (pratMatch) rowEnd = end + pratMatch.index;
+
+        const rowText = seg.substring(end, rowEnd);
+        let quantity = null;
+
+        if (hasTU) {
+          // Formato 2: Total_Units (3ª coluna numérica da linha)
+          const tripleMatch = /\b(\d+)\b\s+\b(\d+)\b\s+\b(\d+)\b/.exec(rowText);
+          if (tripleMatch) quantity = Number(tripleMatch[3]);
+        } else if (hasProf) {
+          // Formato 3: Profundidade = último número 1-3 dígitos da linha
+          const numMatches = [...rowText.matchAll(/(?<![\/\d])(\b\d{1,3}\b)(?!\/)/g)];
+          if (numMatches.length > 0) quantity = Number(numMatches[numMatches.length - 1][1]);
+        } else {
+          // Formato 1: Frentes × Fundo
+          const tripleMatch = /\b(\d+)\b\s+\b(\d+)\b\s+\b(\d+)\b/.exec(rowText);
+          if (tripleMatch) {
+            quantity = Number(tripleMatch[1]) * Number(tripleMatch[3]);
+          }
+        }
+
+        if (!items.has(sku)) items.set(sku, quantity);
+      }
     }
   }
 
@@ -621,16 +683,17 @@ function extractData(text) {
     items: Array.from(items.entries())
       .map(([sku, quantity]) => ({ sku, quantity }))
       .sort((a, b) => parseInt(a.sku) - parseInt(b.sku)),
-    hasTotalUnits
+    hasTotalUnits,
+    hasProfundidade
   };
 }
 
-function renderResult({ items, hasTotalUnits }, pages, shelves) {
+function renderResult({ items, hasTotalUnits, hasProfundidade }, pages, shelves) {
   const skuList    = items.map(i => i.sku).join(',');
   const skuListSemi = items.map(i => i.sku).join('; ');
   const csvContent = 'Código,Quantidade\n' +
     items.map(({ sku, quantity }) => `${sku},${quantity ?? ''}`).join('\n');
-  const quantLabel = hasTotalUnits ? 'Total_Units' : 'Frentes×Fundo';
+  const quantLabel = hasTotalUnits ? 'Total_Units' : hasProfundidade ? 'Profundidade' : 'Frentes×Fundo';
 
   statSkus.textContent    = items.length;
   statPages.textContent   = pages;
