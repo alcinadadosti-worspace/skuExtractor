@@ -339,6 +339,54 @@
 
   .reset-hint:hover { color: var(--text); }
 
+  /* Crossref section */
+  .section-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 28px 0;
+  }
+
+  .crossref-dropzone {
+    border: 1.5px dashed var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 28px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+  }
+
+  .crossref-dropzone:hover, .crossref-dropzone.drag-over {
+    border-color: var(--gold-dim);
+    background: #1a1a1a;
+  }
+
+  .crossref-dropzone p {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .match-summary {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+
+  .match-card {
+    flex: 1;
+    min-width: 90px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+
+  .match-card .stat-label { font-size: 10px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+  .match-card .stat-value { font-family: 'DM Mono', monospace; font-size: 20px; color: var(--gold); font-weight: 500; }
+  .match-card.ok .stat-value  { color: var(--success); }
+  .match-card.miss .stat-value { color: #e08080; }
+
   footer {
     margin-top: 60px;
     font-size: 11px;
@@ -423,6 +471,41 @@
       <button class="btn btn-secondary" id="btnPlanilha">Baixar Planilha (.xlsx)</button>
     </div>
 
+    <!-- Crossref section -->
+    <div id="crossrefSection" style="display:none;">
+      <div class="section-divider"></div>
+      <div class="result-header" style="margin-bottom:10px;">
+        <span class="result-title">Cruzar com planilha</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted); margin-bottom:14px;">
+        Importe a planilha <em>MaterialLinhaSeparacao</em> para adicionar a coluna <strong style="color:var(--gold)">Quantidade</strong> com base nos SKUs extraídos.
+      </p>
+      <div class="crossref-dropzone" id="xlsxDropzone">
+        <p>Arraste a planilha .xlsx aqui ou</p>
+        <button class="btn-upload" id="btnOpenXlsx" type="button" style="margin-top:12px;">Selecionar planilha (.xlsx)</button>
+        <input type="file" id="xlsxInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none;">
+      </div>
+      <div id="xlsxResult" style="display:none; margin-top:16px;">
+        <div class="match-summary">
+          <div class="match-card ok">
+            <div class="stat-label">SKUs cruzados</div>
+            <div class="stat-value" id="matchedCount">0</div>
+          </div>
+          <div class="match-card miss">
+            <div class="stat-label">Sem quantidade</div>
+            <div class="stat-value" id="unmatchedCount">0</div>
+          </div>
+          <div class="match-card">
+            <div class="stat-label">Total de linhas</div>
+            <div class="stat-value" id="totalCount">0</div>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:14px;">
+          <button class="btn btn-primary" id="btnDownloadXlsx">Baixar planilha com Quantidade (.xlsx)</button>
+        </div>
+      </div>
+    </div>
+
     <p class="reset-hint" id="resetBtn">← Processar outro PDF</p>
   </div>
 
@@ -432,6 +515,9 @@
 <script>
 // Use CDN worker; sandboxed previews will fall back to fake worker automatically
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+// Global SKU→quantity map populated after PDF extraction
+let extractedSkuMap = new Map();
 
 const dropzone   = document.getElementById('dropzone');
 const fileInput  = document.getElementById('fileInput');
@@ -484,6 +570,10 @@ function resetUI() {
   dropzone.style.display = 'block';
   fileInput.value        = '';
   progressBar.style.width = '0%';
+  document.getElementById('crossrefSection').style.display = 'none';
+  document.getElementById('xlsxResult').style.display      = 'none';
+  document.getElementById('xlsxInput').value               = '';
+  extractedSkuMap.clear();
 }
 
 function showError(msg) {
@@ -692,6 +782,10 @@ function extractData(text) {
 }
 
 function renderResult({ items, hasTotalUnits, hasProfundidade }, pages, shelves) {
+  // Populate global map for xlsx crossref
+  extractedSkuMap.clear();
+  items.forEach(({ sku, quantity }) => extractedSkuMap.set(sku, quantity));
+
   const skuList    = items.map(i => i.sku).join(',');
   const skuListSemi = items.map(i => i.sku).join('; ');
   const csvContent = 'Código,Quantidade\n' +
@@ -746,6 +840,85 @@ function renderResult({ items, hasTotalUnits, hasProfundidade }, pages, shelves)
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Quantidades');
     XLSX.writeFile(wb, 'planilha_quantidades.xlsx');
+  };
+
+  // Show crossref section
+  document.getElementById('crossrefSection').style.display = 'block';
+  document.getElementById('xlsxResult').style.display      = 'none';
+  document.getElementById('xlsxInput').value               = '';
+}
+
+// ── XLSX crossref logic ───────────────────────────────────────────────────────
+
+const xlsxDropzone = document.getElementById('xlsxDropzone');
+const xlsxInput    = document.getElementById('xlsxInput');
+
+document.getElementById('btnOpenXlsx').addEventListener('click', e => {
+  e.stopPropagation();
+  xlsxInput.click();
+});
+
+xlsxInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  xlsxInput.value = '';
+  if (file) processXlsx(file);
+});
+
+xlsxDropzone.addEventListener('dragover', e => { e.preventDefault(); xlsxDropzone.classList.add('drag-over'); });
+xlsxDropzone.addEventListener('dragleave', () => xlsxDropzone.classList.remove('drag-over'));
+xlsxDropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  xlsxDropzone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processXlsx(file);
+  else showError('Por favor, envie um arquivo .xlsx válido.');
+});
+
+async function processXlsx(file) {
+  const buf = await file.arrayBuffer();
+  const wb  = XLSX.read(buf, { type: 'array' });
+  const ws  = wb.Sheets[wb.SheetNames[0]];
+
+  // Get all rows as arrays (preserves column indices)
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  if (rows.length === 0) { showError('Planilha vazia.'); return; }
+
+  const headers = rows[0].map(h => String(h).trim());
+  const codCol  = headers.findIndex(h => h.toLowerCase() === 'cod material');
+  if (codCol === -1) { showError('Coluna "Cod Material" não encontrada na planilha.'); return; }
+
+  // Add "Quantidade" header (last column)
+  const qtyCol = headers.length;
+  rows[0].push('Quantidade');
+
+  let matched = 0, unmatched = 0;
+  for (let r = 1; r < rows.length; r++) {
+    const rawCod = String(rows[r][codCol] ?? '').trim();
+    // Normalize: pad to match extracted SKUs (remove leading zeros differences)
+    const qty = extractedSkuMap.get(rawCod) ?? extractedSkuMap.get(rawCod.replace(/^0+/, '')) ?? null;
+    rows[r].push(qty !== null && qty !== undefined ? qty : '');
+    if (qty !== null && qty !== undefined) matched++; else unmatched++;
+  }
+
+  // Rebuild workbook with enriched sheet
+  const newWs = XLSX.utils.aoa_to_sheet(rows);
+  const newWb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(newWb, newWs, wb.SheetNames[0]);
+  // Copy remaining sheets if any
+  for (let i = 1; i < wb.SheetNames.length; i++) {
+    XLSX.utils.book_append_sheet(newWb, wb.Sheets[wb.SheetNames[i]], wb.SheetNames[i]);
+  }
+
+  document.getElementById('matchedCount').textContent   = matched;
+  document.getElementById('unmatchedCount').textContent = unmatched;
+  document.getElementById('totalCount').textContent     = rows.length - 1;
+
+  const xlsxResult = document.getElementById('xlsxResult');
+  xlsxResult.style.display = 'block';
+
+  document.getElementById('btnDownloadXlsx').onclick = () => {
+    const outName = file.name.replace(/\.xlsx$/i, '') + '_com_quantidade.xlsx';
+    XLSX.writeFile(newWb, outName);
   };
 }
 </script>
