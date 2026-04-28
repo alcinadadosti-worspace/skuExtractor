@@ -468,7 +468,6 @@
 
     <div class="actions">
       <button class="btn btn-secondary" id="btnDownload">Baixar SKUs (.txt)</button>
-      <button class="btn btn-secondary" id="btnPlanilha">Baixar Planilha (.xlsx)</button>
     </div>
 
     <!-- Crossref section -->
@@ -533,7 +532,6 @@ const statShelves= document.getElementById('statShelves');
 const btnCopy     = document.getElementById('btnCopy');
 const btnCopySemi = document.getElementById('btnCopySemi');
 const btnDownload = document.getElementById('btnDownload');
-const btnPlanilha = document.getElementById('btnPlanilha');
 const resetBtn    = document.getElementById('resetBtn');
 const skuOutputSemi = document.getElementById('skuOutputSemi');
 const errorBox   = document.getElementById('errorBox');
@@ -788,10 +786,6 @@ function renderResult({ items, hasTotalUnits, hasProfundidade }, pages, shelves)
 
   const skuList    = items.map(i => i.sku).join(',');
   const skuListSemi = items.map(i => i.sku).join('; ');
-  const csvContent = 'Código,Quantidade\n' +
-    items.map(({ sku, quantity }) => `${sku},${quantity ?? ''}`).join('\n');
-  const quantLabel = hasTotalUnits ? 'Total_Units' : hasProfundidade ? 'Profundidade' : 'Frentes×Fundo';
-
   statSkus.textContent    = items.length;
   statPages.textContent   = pages;
   statShelves.textContent = shelves;
@@ -808,6 +802,7 @@ function renderResult({ items, hasTotalUnits, hasProfundidade }, pages, shelves)
       } catch {
         const ta = document.createElement('textarea');
         ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px;top:0';
         document.body.appendChild(ta);
         ta.select();
         document.execCommand('copy');
@@ -830,16 +825,6 @@ function renderResult({ items, hasTotalUnits, hasProfundidade }, pages, shelves)
     a.download = 'skus_planograma.txt';
     a.click();
     URL.revokeObjectURL(url);
-  };
-
-  btnPlanilha.textContent = `Baixar Planilha — ${quantLabel} (.xlsx)`;
-  btnPlanilha.onclick = () => {
-    const rows = [['Código', 'Quantidade'],
-      ...items.map(({ sku, quantity }) => [sku, quantity ?? ''])];
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Quantidades');
-    XLSX.writeFile(wb, 'planilha_quantidades.xlsx');
   };
 
   // Show crossref section
