@@ -6,6 +6,9 @@
 <title>SKU Extractor — Planogramas</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.3/qrcode.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
 
@@ -394,6 +397,138 @@
     letter-spacing: 0.05em;
     text-align: center;
   }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 32px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 14px 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .tab-btn:hover { color: var(--text); }
+
+  .tab-btn.active {
+    color: var(--gold);
+    border-bottom-color: var(--gold);
+  }
+
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  /* Requisição table */
+  .req-table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-top: 16px;
+    max-height: 480px;
+    overflow: auto;
+  }
+
+  .req-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+  }
+
+  .req-table thead {
+    position: sticky;
+    top: 0;
+    background: var(--surface2);
+    z-index: 1;
+  }
+
+  .req-table th {
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    color: var(--gold);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  .req-table td {
+    padding: 8px 12px;
+    color: #ccc;
+    border-bottom: 1px solid #1a1a1a;
+    vertical-align: middle;
+  }
+
+  .req-table tr:hover td { background: #1a1a1a; }
+
+  .req-table td.num {
+    text-align: right;
+    color: var(--gold);
+    font-weight: 500;
+  }
+
+  .req-table td.cod { color: #fff; }
+
+  .req-qty-input {
+    width: 72px;
+    padding: 6px 8px;
+    background: #0d0d0d;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    text-align: right;
+  }
+
+  .req-qty-input:focus {
+    outline: none;
+    border-color: var(--gold-dim);
+  }
+
+  .req-qty-input.invalid {
+    border-color: rgba(220, 80, 80, 0.6);
+    background: rgba(220, 80, 80, 0.08);
+  }
+
+  .req-zero {
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .req-search {
+    display: block;
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    margin-top: 16px;
+  }
+
+  .req-search:focus {
+    outline: none;
+    border-color: var(--gold-dim);
+  }
 </style>
 </head>
 <body>
@@ -404,6 +539,15 @@
     <h1>SKU Extractor</h1>
     <p class="subtitle">Carregue um PDF de planograma e extraia todos os códigos de produto automaticamente.</p>
   </header>
+
+  <!-- Tabs -->
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="extractor" type="button">Extrator de SKU</button>
+    <button class="tab-btn" data-tab="requisicao" type="button">Lista de Requisição</button>
+  </nav>
+
+  <!-- Tab: Extractor -->
+  <div class="tab-pane active" id="tab-extractor">
 
   <!-- Drop Zone -->
   <div class="dropzone" id="dropzone">
@@ -507,6 +651,69 @@
 
     <p class="reset-hint" id="resetBtn">← Processar outro PDF</p>
   </div>
+
+  </div><!-- /tab-extractor -->
+
+  <!-- Tab: Lista de Requisição -->
+  <div class="tab-pane" id="tab-requisicao">
+    <p style="font-size:13px; color:var(--muted); margin-bottom:18px;">
+      Importe a planilha <em>MaterialLinhaSeparacao</em>. O sistema mostra a quantidade disponível de cada item e permite informar quanto você quer pedir — limitado pelo <strong style="color:var(--gold)">Total disponível</strong>.
+    </p>
+
+    <div class="crossref-dropzone" id="reqDropzone">
+      <p>Arraste a planilha .xlsx aqui ou</p>
+      <button class="btn-upload" id="btnOpenReq" type="button" style="margin-top:12px;">Selecionar planilha (.xlsx)</button>
+      <input type="file" id="reqInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none;">
+    </div>
+
+    <div id="reqResult" style="display:none;">
+      <div class="match-summary" style="margin-top:18px;">
+        <div class="match-card">
+          <div class="stat-label">Itens na planilha</div>
+          <div class="stat-value" id="reqTotalItems">0</div>
+        </div>
+        <div class="match-card ok">
+          <div class="stat-label">Com disponibilidade</div>
+          <div class="stat-value" id="reqAvailItems">0</div>
+        </div>
+        <div class="match-card">
+          <div class="stat-label">Soma disponível</div>
+          <div class="stat-value" id="reqSumAvail">0</div>
+        </div>
+        <div class="match-card ok">
+          <div class="stat-label">Itens solicitados</div>
+          <div class="stat-value" id="reqRequested">0</div>
+        </div>
+      </div>
+
+      <input type="text" id="reqSearch" class="req-search" placeholder="Filtrar por código ou descrição…">
+
+      <div class="req-table-wrap">
+        <table class="req-table" id="reqTable">
+          <thead>
+            <tr>
+              <th>Cod Material</th>
+              <th>Desc Material</th>
+              <th>Nome Linha Separacao</th>
+              <th>Estacao</th>
+              <th>Rack</th>
+              <th>Linha</th>
+              <th>Coluna</th>
+              <th style="text-align:right;">Total disponível</th>
+              <th style="text-align:right;">Quantidade solicitada</th>
+            </tr>
+          </thead>
+          <tbody id="reqTbody"></tbody>
+        </table>
+      </div>
+
+      <div class="actions" style="margin-top:16px;">
+        <button class="btn btn-secondary" id="btnReqClear" type="button">Limpar quantidades</button>
+        <button class="btn btn-primary" id="btnReqDownload" type="button">Gerar planilha (.xlsx)</button>
+        <button class="btn btn-primary" id="btnReqDownloadPdf" type="button">Gerar PDF</button>
+      </div>
+    </div>
+  </div><!-- /tab-requisicao -->
 
   <footer>SKU Extractor · Planogramas · Ciclo automático</footer>
 </div>
@@ -910,6 +1117,360 @@ async function processXlsx(file) {
     XLSX.writeFile(newWb, outName);
   };
 }
+
+// ── Tab navigation ────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const target = btn.getAttribute('data-tab');
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.tab-pane').forEach(p => {
+      p.classList.toggle('active', p.id === 'tab-' + target);
+    });
+  });
+});
+
+// ── Lista de Requisição ───────────────────────────────────────────────────────
+// Colunas que devem permanecer na planilha de saída (na ordem desejada).
+// As demais (Cod Linha Separacao, Total físico, Total alocado, Total mínimo,
+// Cod Centro Estoque, Centro Estoque, Cod Centro Dist, Nome Centro Distr,
+// Situacao) são descartadas no momento da exportação.
+const REQ_KEEP_COLS = [
+  'Cod Material',
+  'Desc Material',
+  'Nome Linha Separacao',
+  'Estacao',
+  'Rack',
+  'Linha prod alocado',
+  'Coluna prod alocado',
+  'Total disponível'
+];
+
+const reqDropzone = document.getElementById('reqDropzone');
+const reqInput    = document.getElementById('reqInput');
+const reqResult   = document.getElementById('reqResult');
+const reqTbody    = document.getElementById('reqTbody');
+const reqSearch   = document.getElementById('reqSearch');
+
+// Estado atual da planilha carregada
+let reqRows       = [];   // array of row objects: { keep: {col:val}, available: number, requested: number }
+let reqSourceName = '';
+
+document.getElementById('btnOpenReq').addEventListener('click', e => {
+  e.stopPropagation();
+  reqInput.click();
+});
+
+reqInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  reqInput.value = '';
+  if (file) processReqFile(file);
+});
+
+reqDropzone.addEventListener('dragover',  e => { e.preventDefault(); reqDropzone.classList.add('drag-over'); });
+reqDropzone.addEventListener('dragleave', () => reqDropzone.classList.remove('drag-over'));
+reqDropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  reqDropzone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processReqFile(file);
+});
+
+function normalizeHeader(h) {
+  return String(h || '').trim().toLowerCase();
+}
+
+async function processReqFile(file) {
+  try {
+    const buf  = await file.arrayBuffer();
+    const wb   = XLSX.read(buf, { type: 'array' });
+    const ws   = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (rows.length < 2) { alert('Planilha vazia ou sem dados.'); return; }
+
+    const headers = rows[0].map(h => String(h).trim());
+    const idxByName = name => headers.findIndex(h => normalizeHeader(h) === normalizeHeader(name));
+
+    const availIdx = idxByName('Total disponível');
+    if (availIdx === -1) {
+      alert('Coluna "Total disponível" não encontrada na planilha.');
+      return;
+    }
+
+    // Mapeia índice de cada coluna a manter
+    const keepIdx = REQ_KEEP_COLS.map(col => ({ col, idx: idxByName(col) }));
+
+    reqRows = [];
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      if (row.every(v => v === '' || v === null || v === undefined)) continue;
+
+      const keep = {};
+      for (const { col, idx } of keepIdx) {
+        keep[col] = idx === -1 ? '' : row[idx];
+      }
+      const availRaw = row[availIdx];
+      const available = Number(availRaw);
+      reqRows.push({
+        keep,
+        available: Number.isFinite(available) ? available : 0,
+        requested: 0
+      });
+    }
+
+    reqSourceName = file.name;
+    renderReqTable();
+    reqResult.style.display = 'block';
+  } catch (err) {
+    console.error(err);
+    alert('Erro ao ler planilha: ' + err.message);
+  }
+}
+
+function renderReqTable() {
+  const filter = (reqSearch.value || '').trim().toLowerCase();
+  reqTbody.innerHTML = '';
+
+  for (let i = 0; i < reqRows.length; i++) {
+    const item = reqRows[i];
+    const cod  = String(item.keep['Cod Material'] ?? '');
+    const desc = String(item.keep['Desc Material'] ?? '');
+    if (filter && !(cod.toLowerCase().includes(filter) || desc.toLowerCase().includes(filter))) continue;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="cod">${escapeHtml(cod)}</td>
+      <td>${escapeHtml(desc)}</td>
+      <td>${escapeHtml(String(item.keep['Nome Linha Separacao'] ?? ''))}</td>
+      <td>${escapeHtml(String(item.keep['Estacao'] ?? ''))}</td>
+      <td>${escapeHtml(String(item.keep['Rack'] ?? ''))}</td>
+      <td>${escapeHtml(String(item.keep['Linha prod alocado'] ?? ''))}</td>
+      <td>${escapeHtml(String(item.keep['Coluna prod alocado'] ?? ''))}</td>
+      <td class="num ${item.available <= 0 ? 'req-zero' : ''}">${item.available}</td>
+      <td style="text-align:right;"></td>
+    `;
+    const qtyCell = tr.lastElementChild;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '0';
+    input.max = String(item.available);
+    input.step = '1';
+    input.className = 'req-qty-input';
+    input.value = item.requested ? String(item.requested) : '';
+    input.disabled = item.available <= 0;
+    input.dataset.index = String(i);
+    input.addEventListener('input', onQtyInput);
+    qtyCell.appendChild(input);
+    reqTbody.appendChild(tr);
+  }
+  updateReqSummary();
+}
+
+function onQtyInput(e) {
+  const input = e.target;
+  const i     = Number(input.dataset.index);
+  const item  = reqRows[i];
+  let val     = input.value === '' ? 0 : parseInt(input.value, 10);
+  if (!Number.isFinite(val) || val < 0) val = 0;
+
+  // Trava no Total disponível: nunca permite pedir mais do que existe.
+  if (val > item.available) {
+    val = item.available;
+    input.value = String(val);
+    input.classList.add('invalid');
+    setTimeout(() => input.classList.remove('invalid'), 600);
+  }
+
+  item.requested = val;
+  updateReqSummary();
+}
+
+function updateReqSummary() {
+  const total   = reqRows.length;
+  const avail   = reqRows.filter(r => r.available > 0).length;
+  const sumAv   = reqRows.reduce((s, r) => s + (r.available > 0 ? r.available : 0), 0);
+  const sumReq  = reqRows.reduce((s, r) => s + (r.requested > 0 ? r.requested : 0), 0);
+  document.getElementById('reqTotalItems').textContent = total;
+  document.getElementById('reqAvailItems').textContent = avail;
+  document.getElementById('reqSumAvail').textContent   = sumAv;
+  document.getElementById('reqRequested').textContent  = sumReq;
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+reqSearch.addEventListener('input', renderReqTable);
+
+document.getElementById('btnReqClear').addEventListener('click', () => {
+  for (const r of reqRows) r.requested = 0;
+  renderReqTable();
+});
+
+document.getElementById('btnReqDownload').addEventListener('click', () => {
+  if (reqRows.length === 0) return;
+
+  // Apenas linhas com quantidade solicitada > 0 entram na planilha de requisição.
+  const selected = reqRows.filter(r => r.requested > 0);
+  if (selected.length === 0) {
+    alert('Informe ao menos uma quantidade antes de gerar a planilha.');
+    return;
+  }
+
+  const outHeaders = [...REQ_KEEP_COLS, 'Quantidade solicitada'];
+  const outRows = [outHeaders];
+  for (const r of selected) {
+    const row = REQ_KEEP_COLS.map(col => r.keep[col] ?? '');
+    row.push(r.requested);
+    outRows.push(row);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(outRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Requisição');
+  const outName = (reqSourceName.replace(/\.xlsx$/i, '') || 'requisicao') + '_requisicao.xlsx';
+  XLSX.writeFile(wb, outName);
+});
+
+// Gera um código de 9 dígitos único.
+// Persiste todos os códigos já emitidos em localStorage e regenera em caso
+// de colisão. Como 9 dígitos dão 10^9 combinações, a colisão é praticamente
+// impossível, mas verificamos por segurança.
+function generateUniqueReqCode() {
+  const KEY = 'reqIssuedCodes';
+  let issued;
+  try { issued = JSON.parse(localStorage.getItem(KEY) || '[]'); }
+  catch { issued = []; }
+  const set = new Set(issued);
+
+  let code = '';
+  for (let attempt = 0; attempt < 50; attempt++) {
+    // Sempre 9 dígitos: faixa 100000000 .. 999999999
+    code = String(Math.floor(100000000 + Math.random() * 900000000));
+    if (!set.has(code)) break;
+  }
+
+  issued.push(code);
+  // Mantém só os últimos 100k para não estourar quota do localStorage.
+  if (issued.length > 100000) issued = issued.slice(-100000);
+  try { localStorage.setItem(KEY, JSON.stringify(issued)); } catch {}
+  return code;
+}
+
+document.getElementById('btnReqDownloadPdf').addEventListener('click', async () => {
+  if (reqRows.length === 0) return;
+
+  const selected = reqRows.filter(r => r.requested > 0);
+  if (selected.length === 0) {
+    alert('Informe ao menos uma quantidade antes de gerar o PDF.');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+  const now      = new Date();
+  const dateStr  = now.toLocaleDateString('pt-BR');
+  const timeStr  = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const totalQty = selected.reduce((s, r) => s + r.requested, 0);
+
+  // Código único + QR no canto superior direito da primeira página.
+  const reqCode = generateUniqueReqCode();
+  let qrDataUrl = null;
+  try {
+    qrDataUrl = await QRCode.toDataURL(reqCode, {
+      margin: 1,
+      width: 240,
+      errorCorrectionLevel: 'M'
+    });
+  } catch (e) {
+    console.error('Falha ao gerar QR:', e);
+  }
+
+  const pageW   = doc.internal.pageSize.getWidth();
+  const qrSize  = 76;
+  const qrX     = pageW - 24 - qrSize;
+  const qrY     = 22;
+  if (qrDataUrl) {
+    doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(reqCode, qrX + qrSize / 2, qrY + qrSize + 12, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text('Lista de Requisição', 30, 40);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(100);
+  doc.text(
+    `Gerado em ${dateStr} às ${timeStr}  ·  ${selected.length} itens  ·  ${totalQty} unidades`,
+    30, 56
+  );
+  doc.setTextColor(0);
+
+  const head = [[...REQ_KEEP_COLS, 'Quantidade solicitada']];
+  const body = selected.map(r => {
+    const row = REQ_KEEP_COLS.map(col => {
+      const v = r.keep[col];
+      return v === null || v === undefined ? '' : String(v);
+    });
+    row.push(String(r.requested));
+    return row;
+  });
+
+  doc.autoTable({
+    head,
+    body,
+    startY: 120,
+    margin: { left: 24, right: 24 },
+    styles: {
+      fontSize: 8,
+      cellPadding: 4,
+      overflow: 'linebreak',
+      valign: 'middle',
+      lineColor: [220, 220, 220],
+      lineWidth: 0.4
+    },
+    headStyles: {
+      fillColor: [201, 168, 76],
+      textColor: [13, 13, 13],
+      fontStyle: 'bold',
+      fontSize: 8
+    },
+    alternateRowStyles: { fillColor: [248, 246, 240] },
+    columnStyles: {
+      0: { cellWidth: 58 },                                       // Cod Material
+      1: { cellWidth: 'auto' },                                   // Desc Material
+      2: { cellWidth: 110 },                                      // Nome Linha Separacao
+      3: { cellWidth: 50 },                                       // Estacao
+      4: { cellWidth: 50 },                                       // Rack
+      5: { cellWidth: 45, halign: 'center' },                     // Linha prod alocado
+      6: { cellWidth: 45, halign: 'center' },                     // Coluna prod alocado
+      7: { cellWidth: 55, halign: 'right' },                      // Total disponível
+      8: { cellWidth: 70, halign: 'right', fontStyle: 'bold' }    // Quantidade solicitada
+    },
+    didDrawPage: (data) => {
+      const pageCount = doc.internal.getNumberOfPages();
+      const pageSize  = doc.internal.pageSize;
+      const pageH     = pageSize.height || pageSize.getHeight();
+      const pageW     = pageSize.width  || pageSize.getWidth();
+      doc.setFontSize(8);
+      doc.setTextColor(140);
+      doc.text(
+        `Página ${data.pageNumber} de ${pageCount}`,
+        pageW - 24, pageH - 14, { align: 'right' }
+      );
+      doc.setTextColor(0);
+    }
+  });
+
+  const outName = (reqSourceName.replace(/\.xlsx$/i, '') || 'requisicao') + '_requisicao.pdf';
+  doc.save(outName);
+});
 </script>
 </body>
 </html>
