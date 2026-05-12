@@ -8,7 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.3/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
 
@@ -1385,14 +1385,38 @@ document.getElementById('btnReqDownloadPdf').addEventListener('click', async () 
   const totalQty = selected.reduce((s, r) => s + r.requested, 0);
 
   // Código único + QR no canto superior direito da primeira página.
+  // qrcode-generator é síncrono, mas seu createDataURL retorna GIF, que o
+  // jsPDF nem sempre aceita. Renderizamos os módulos num canvas e exportamos
+  // como PNG para garantir compatibilidade.
   const reqCode = generateUniqueReqCode();
   let qrDataUrl = null;
   try {
-    qrDataUrl = await QRCode.toDataURL(reqCode, {
-      margin: 1,
-      width: 240,
-      errorCorrectionLevel: 'M'
-    });
+    if (typeof qrcode !== 'function') {
+      throw new Error('Biblioteca qrcode-generator não carregada');
+    }
+    const qr = qrcode(0, 'M');
+    qr.addData(reqCode);
+    qr.make();
+
+    const modules  = qr.getModuleCount();
+    const cellSize = 8;
+    const quiet    = 2;
+    const sizePx   = (modules + quiet * 2) * cellSize;
+    const canvas   = document.createElement('canvas');
+    canvas.width   = sizePx;
+    canvas.height  = sizePx;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, sizePx, sizePx);
+    ctx.fillStyle = '#000000';
+    for (let r = 0; r < modules; r++) {
+      for (let c = 0; c < modules; c++) {
+        if (qr.isDark(r, c)) {
+          ctx.fillRect((c + quiet) * cellSize, (r + quiet) * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+    qrDataUrl = canvas.toDataURL('image/png');
   } catch (e) {
     console.error('Falha ao gerar QR:', e);
   }
