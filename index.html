@@ -1303,6 +1303,17 @@ function escapeHtml(s) {
 
 reqSearch.addEventListener('input', renderReqTable);
 
+// Limpa todo o estado da aba de requisição após gerar saída.
+// Faz a planilha importada sumir da tela para evitar reuso acidental.
+function resetReqState() {
+  reqRows = [];
+  reqSourceName = '';
+  reqTbody.innerHTML = '';
+  reqSearch.value = '';
+  reqResult.style.display = 'none';
+  reqInput.value = '';
+}
+
 document.getElementById('btnReqClear').addEventListener('click', () => {
   for (const r of reqRows) r.requested = 0;
   renderReqTable();
@@ -1328,6 +1339,7 @@ document.getElementById('btnReqDownload').addEventListener('click', () => {
   XLSX.utils.book_append_sheet(wb, ws, 'Requisição');
   const outName = (reqSourceName.replace(/\.xlsx$/i, '') || 'requisicao') + '_requisicao.xlsx';
   XLSX.writeFile(wb, outName);
+  resetReqState();
 });
 
 // Gera um código de 9 dígitos único.
@@ -1467,6 +1479,7 @@ document.getElementById('btnReqDownloadPdf').addEventListener('click', async () 
 
   const outName = (reqSourceName.replace(/\.xlsx$/i, '') || 'requisicao') + '_requisicao.pdf';
   doc.save(outName);
+  resetReqState();
 });
 </script>
 </body>
