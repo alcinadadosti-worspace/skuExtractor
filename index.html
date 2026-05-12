@@ -1309,18 +1309,15 @@ document.getElementById('btnReqClear').addEventListener('click', () => {
 });
 
 document.getElementById('btnReqDownload').addEventListener('click', () => {
-  if (reqRows.length === 0) return;
-
-  // Apenas linhas com quantidade solicitada > 0 entram na planilha de requisição.
-  const selected = reqRows.filter(r => r.requested > 0);
-  if (selected.length === 0) {
-    alert('Informe ao menos uma quantidade antes de gerar a planilha.');
+  if (reqRows.length === 0) {
+    alert('Importe uma planilha antes de gerar a saída.');
     return;
   }
 
+  // Todas as linhas da planilha entram, com a quantidade digitada (0 inclusive).
   const outHeaders = [...REQ_KEEP_COLS, 'Quantidade solicitada'];
   const outRows = [outHeaders];
-  for (const r of selected) {
+  for (const r of reqRows) {
     const row = REQ_KEEP_COLS.map(col => r.keep[col] ?? '');
     row.push(r.requested);
     outRows.push(row);
@@ -1359,13 +1356,13 @@ function generateUniqueReqCode() {
 }
 
 document.getElementById('btnReqDownloadPdf').addEventListener('click', async () => {
-  if (reqRows.length === 0) return;
-
-  const selected = reqRows.filter(r => r.requested > 0);
-  if (selected.length === 0) {
-    alert('Informe ao menos uma quantidade antes de gerar o PDF.');
+  if (reqRows.length === 0) {
+    alert('Importe uma planilha antes de gerar o PDF.');
     return;
   }
+
+  // Todas as linhas da planilha entram, com a quantidade digitada (0 inclusive).
+  const selected = reqRows;
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
